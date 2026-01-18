@@ -197,7 +197,7 @@ async function run() {
             res.send(result);
         });
 
-        // ওয়ার্কার স্ট্যাটাস API (run এর ভেতরে নিয়ে আসা হয়েছে যাতে ভেরিয়েবল পায়)
+    
         app.get('/worker-stats/:email', async (req, res) => {
             const email = req.params.email;
             const query = { worker_email: email };
