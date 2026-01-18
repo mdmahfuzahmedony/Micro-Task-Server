@@ -1,5 +1,9 @@
 const express = require('express');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const {
+    MongoClient,
+    ServerApiVersion,
+    ObjectId
+} = require('mongodb');
 const cors = require('cors');
 require('dotenv').config();
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -14,7 +18,7 @@ const port = process.env.PORT || 5000;
 // --- Middleware ---
 app.use(express.json());
 app.use(cors({
-    origin: ["http://localhost:3000", "https://your-vercel-frontend-link.vercel.app"], // আপনার ফ্রন্টএন্ড লিঙ্কটি এখানে দিলে ভালো হয়
+    origin: ["http://localhost:3000 ", "https://your-vercel-frontend-link.vercel.app"], // আপনার ফ্রন্টএন্ড লিঙ্কটি এখানে দিলে ভালো হয়
     credentials: true
 }));
 
@@ -48,7 +52,9 @@ async function run() {
 
         app.post('/users', async (req, res) => {
             const user = req.body;
-            const query = { email: user.email };
+            const query = {
+                email: user.email
+            };
             const updateDoc = {
                 $setOnInsert: {
                     createdAt: new Date(),
@@ -60,14 +66,18 @@ async function run() {
                     role: user.role,
                 }
             };
-            const options = { upsert: true };
+            const options = {
+                upsert: true
+            };
             const result = await usersCollection.updateOne(query, updateDoc, options);
             res.send(result);
         });
 
         app.get('/users/:email', async (req, res) => {
             const email = req.params.email;
-            const query = { email: email };
+            const query = {
+                email: email
+            };
             const result = await usersCollection.findOne(query);
             res.send(result);
         });
@@ -75,6 +85,100 @@ async function run() {
         app.get('/users', async (req, res) => {
             const result = await usersCollection.find().toArray();
             res.send(result);
+        });
+
+
+        // ১. এডমিন হোম - স্ট্যাটাস (Stats) API
+        app.get('/admin-stats', async (req, res) => {
+            try {
+                const totalWorker = await usersCollection.countDocuments({
+                    role: 'worker'
+                });
+                const totalBuyer = await usersCollection.countDocuments({
+                    role: 'buyer'
+                });
+
+                // সব ইউজারের কয়েনের যোগফল
+                const coinStats = await usersCollection.aggregate([{
+                    $group: {
+                        _id: null,
+                        totalCoin: {
+                            $sum: "$balance"
+                        }
+                    }
+                }]).toArray();
+                const totalAvailableCoin = coinStats.length > 0 ? coinStats[0].totalCoin : 0;
+
+                // টোটাল সাকসেসফুল পেমেন্ট (পেমেন্ট কালেকশন থেকে)
+                const totalPayments = await paymentsCollection.countDocuments();
+
+                res.send({
+                    totalWorker,
+                    totalBuyer,
+                    totalAvailableCoin,
+                    totalPayments
+                });
+            } catch (error) {
+                res.status(500).send({
+                    message: "Error fetching stats"
+                });
+            }
+        });
+
+        // ২. উইথড্র রিকোয়েস্ট - পেন্ডিং লিস্ট
+        app.get('/withdraw-requests', async (req, res) => {
+            try {
+                const withdrawCollection = db.collection("withdraws"); // আপনার কালেকশন নাম অনুযায়ী চেক করুন
+                const result = await withdrawCollection.find({
+                    status: 'pending'
+                }).toArray();
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({
+                    message: "Error fetching requests"
+                });
+            }
+        });
+
+        // ৩. উইথড্র রিকোয়েস্ট এপ্রুভ (Payment Success)
+        app.patch('/approve-withdrawal/:id', async (req, res) => {
+            try {
+                const id = req.params.id;
+                const withdrawCollection = db.collection("withdraws");
+
+                // রিকোয়েস্টটি খুঁজে বের করা
+                const request = await withdrawCollection.findOne({
+                    _id: new ObjectId(id)
+                });
+                if (!request) return res.status(404).send("Request not found");
+
+                const worker_email = request.worker_email;
+                const withdrawal_amount = parseFloat(request.withdrawal_amount);
+
+                // ক. স্ট্যাটাস 'approved' করা
+                await withdrawCollection.updateOne({
+                    _id: new ObjectId(id)
+                }, {
+                    $set: {
+                        status: 'approved'
+                    }
+                });
+
+                // খ. ইউজারের ব্যালেন্স থেকে কয়েন কমানো
+                const result = await usersCollection.updateOne({
+                    email: worker_email
+                }, {
+                    $inc: {
+                        balance: -withdrawal_amount
+                    }
+                });
+
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({
+                    message: "Error approving withdrawal"
+                });
+            }
         });
 
         // ============================================================
@@ -85,9 +189,13 @@ async function run() {
             const task = req.body;
             const total_payable_amount = parseInt(task.required_workers) * parseFloat(task.payable_amount);
 
-            const user = await usersCollection.findOne({ email: task.buyer_email });
+            const user = await usersCollection.findOne({
+                email: task.buyer_email
+            });
             if (!user || user.balance < total_payable_amount) {
-                return res.status(400).send({ message: "Insufficient coins" });
+                return res.status(400).send({
+                    message: "Insufficient coins"
+                });
             }
 
             const newTask = {
@@ -99,16 +207,30 @@ async function run() {
             };
 
             const insertResult = await tasksCollection.insertOne(newTask);
-            const updateDoc = { $inc: { balance: -total_payable_amount } };
-            const updateResult = await usersCollection.updateOne({ email: task.buyer_email }, updateDoc);
+            const updateDoc = {
+                $inc: {
+                    balance: -total_payable_amount
+                }
+            };
+            const updateResult = await usersCollection.updateOne({
+                email: task.buyer_email
+            }, updateDoc);
 
-            res.send({ success: true, insertResult, updateResult });
+            res.send({
+                success: true,
+                insertResult,
+                updateResult
+            });
         });
 
         app.get('/my-tasks/:email', async (req, res) => {
             const email = req.params.email;
-            const query = { buyer_email: email };
-            const result = await tasksCollection.find(query).sort({ created_at: -1 }).toArray();
+            const query = {
+                buyer_email: email
+            };
+            const result = await tasksCollection.find(query).sort({
+                created_at: -1
+            }).toArray();
             res.send(result);
         });
 
@@ -117,14 +239,22 @@ async function run() {
         // ============================================================
 
         app.get('/all-tasks', async (req, res) => {
-            const query = { required_workers: { $gt: 0 } };
-            const result = await tasksCollection.find(query).sort({ created_at: -1 }).toArray();
+            const query = {
+                required_workers: {
+                    $gt: 0
+                }
+            };
+            const result = await tasksCollection.find(query).sort({
+                created_at: -1
+            }).toArray();
             res.send(result);
         });
 
         app.get('/task/:id', async (req, res) => {
             const id = req.params.id;
-            const query = { _id: new ObjectId(id) };
+            const query = {
+                _id: new ObjectId(id)
+            };
             const result = await tasksCollection.findOne(query);
             res.send(result);
         });
@@ -134,19 +264,27 @@ async function run() {
         // ============================================================
 
         app.post("/create-payment-intent", async (req, res) => {
-            const { price } = req.body;
-            if (!price || price <= 0) return res.status(400).send({ message: "Invalid price" });
+            const {
+                price
+            } = req.body;
+            if (!price || price <= 0) return res.status(400).send({
+                message: "Invalid price"
+            });
 
-            const amount = parseInt(price * 100); 
+            const amount = parseInt(price * 100);
             try {
                 const paymentIntent = await stripe.paymentIntents.create({
                     amount: amount,
                     currency: "usd",
                     payment_method_types: ["card"],
                 });
-                res.send({ clientSecret: paymentIntent.client_secret });
+                res.send({
+                    clientSecret: paymentIntent.client_secret
+                });
             } catch (error) {
-                res.status(500).send({ error: error.message });
+                res.status(500).send({
+                    error: error.message
+                });
             }
         });
 
@@ -160,16 +298,29 @@ async function run() {
                 date: new Date()
             });
 
-            const filter = { email: payment.email };
-            const updateDoc = { $inc: { balance: parseInt(payment.coins) } };
+            const filter = {
+                email: payment.email
+            };
+            const updateDoc = {
+                $inc: {
+                    balance: parseInt(payment.coins)
+                }
+            };
             const updateResult = await usersCollection.updateOne(filter, updateDoc);
 
-            res.send({ paymentResult, updateResult });
+            res.send({
+                paymentResult,
+                updateResult
+            });
         });
 
         app.get('/payment-history/:email', async (req, res) => {
             const email = req.params.email;
-            const result = await paymentsCollection.find({ email: email }).sort({ date: -1 }).toArray();
+            const result = await paymentsCollection.find({
+                email: email
+            }).sort({
+                date: -1
+            }).toArray();
             res.send(result);
         });
 
@@ -177,45 +328,106 @@ async function run() {
         // ৫. সাবমিশন এবং ওয়ার্কার ড্যাশবোর্ড APIs
         // ============================================================
 
+        // ওয়ার্কারের নিজের করা সব সাবমিশন দেখার API
+        app.get('/my-submissions/:worker_email', async (req, res) => {
+            try {
+                const email = req.params.worker_email;
+                const query = {
+                    worker_email: email
+                };
+                const result = await submissionsCollection.find(query).toArray();
+                res.send(result);
+            } catch (err) {
+                res.status(500).send(err);
+            }
+        });
+
         app.get('/pending-submissions/:email', async (req, res) => {
             const email = req.params.email;
-            const query = { buyer_email: email, status: "pending" };
+            const query = {
+                buyer_email: email,
+                status: "pending"
+            };
             const result = await submissionsCollection.find(query).toArray();
             res.send(result);
         });
 
         app.patch('/approve-submission/:id', async (req, res) => {
             const id = req.params.id;
-            const { worker_email, amount } = req.body;
-            const filter = { _id: new ObjectId(id) };
-            await submissionsCollection.updateOne(filter, { $set: { status: "approve" } });
-            const result = await usersCollection.updateOne({ email: worker_email }, { $inc: { balance: parseFloat(amount) } });
+            const {
+                worker_email,
+                amount
+            } = req.body;
+            const filter = {
+                _id: new ObjectId(id)
+            };
+            await submissionsCollection.updateOne(filter, {
+                $set: {
+                    status: "approve"
+                }
+            });
+            const result = await usersCollection.updateOne({
+                email: worker_email
+            }, {
+                $inc: {
+                    balance: parseFloat(amount)
+                }
+            });
             res.send(result);
         });
 
         app.patch('/reject-submission/:id', async (req, res) => {
             const id = req.params.id;
-            const { task_id } = req.body;
-            await submissionsCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status: "rejected" } });
-            const result = await tasksCollection.updateOne({ _id: new ObjectId(task_id) }, { $inc: { required_workers: 1 } });
+            const {
+                task_id
+            } = req.body;
+            await submissionsCollection.updateOne({
+                _id: new ObjectId(id)
+            }, {
+                $set: {
+                    status: "rejected"
+                }
+            });
+            const result = await tasksCollection.updateOne({
+                _id: new ObjectId(task_id)
+            }, {
+                $inc: {
+                    required_workers: 1
+                }
+            });
             res.send(result);
         });
 
-    
+
         app.get('/worker-stats/:email', async (req, res) => {
             const email = req.params.email;
-            const query = { worker_email: email };
+            const query = {
+                worker_email: email
+            };
             const totalSubmission = await submissionsCollection.countDocuments(query);
-            const totalPending = await submissionsCollection.countDocuments({ worker_email: email, status: "pending" });
-            const approvedSubmissions = await submissionsCollection.find({ worker_email: email, status: "approve" }).toArray();
+            const totalPending = await submissionsCollection.countDocuments({
+                worker_email: email,
+                status: "pending"
+            });
+            const approvedSubmissions = await submissionsCollection.find({
+                worker_email: email,
+                status: "approve"
+            }).toArray();
             const totalEarning = approvedSubmissions.reduce((sum, task) => sum + parseFloat(task.payable_amount || 0), 0);
 
-            res.send({ totalSubmission, totalPending, totalEarning });
+            res.send({
+                totalSubmission,
+                totalPending,
+                totalEarning
+            });
         });
 
         app.get('/worker-approved-tasks/:email', async (req, res) => {
             const email = req.params.email;
-            const query = { worker_email: email, status: "approve" };
+            const query = {
+                worker_email: email,
+                status: "approve"
+            };
             const result = await submissionsCollection.find(query).toArray();
             res.send(result);
         });
