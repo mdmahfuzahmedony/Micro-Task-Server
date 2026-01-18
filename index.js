@@ -2,7 +2,11 @@ const express = require('express');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const cors = require('cors');
 require('dotenv').config();
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+const stripe = stripeSecretKey ? require('stripe')(stripeSecretKey) : null;
+// একদম উপরের এই লাইনটি এভাবে পরিবর্তন করুন
+
+
 
 const app = express();
 const port = process.env.PORT || 5000;
